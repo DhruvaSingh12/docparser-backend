@@ -1,6 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlmodel import Session
-import aiofiles
 import os
 import tempfile
 from datetime import datetime

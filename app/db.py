@@ -1,20 +1,22 @@
 from sqlmodel import SQLModel, create_engine, Session
 import os
+import logging
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
 
-# Get database URL from environment (Neon PostgreSQL)
+load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is not set. Please configure your Neon database URL in .env file")
 
-# Create engine with SSL mode for Neon
+DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
+
 engine = create_engine(
     DATABASE_URL,
-    echo=True,  # Set to False in production
+    echo=DEBUG_MODE,  # Only show SQL queries in debug mode
     pool_pre_ping=True,  # Verify connections before use
     pool_recycle=300,    # Recycle connections every 5 minutes
 )

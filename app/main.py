@@ -2,12 +2,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
+import warnings
 from dotenv import load_dotenv
-
 from app.api.v1 import router as v1_router
 from app.db import init_db
+from datetime import datetime, timezone
 
-# Load environment variables
+warnings.filterwarnings("ignore", category=UserWarning, module="paddle")
+warnings.filterwarnings("ignore", message=".*ccache.*")
+
 load_dotenv()
 
 @asynccontextmanager
@@ -23,7 +26,7 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title=os.getenv("APP_NAME", "DocParse API"),
+    title=os.getenv("APP_NAME", "DocParse"),
     description="AI-powered medical document parsing for CGHS compliance",
     version="1.0.0",
     lifespan=lifespan
@@ -56,5 +59,5 @@ async def health_check():
     return {
         "status": "healthy",
         "database": "connected",
-        "timestamp": "2025-09-21T00:00:00Z"
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
