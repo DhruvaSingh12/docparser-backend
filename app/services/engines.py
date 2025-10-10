@@ -2,6 +2,7 @@ import os
 from typing import Dict, Any
 from .preprocess import preprocess_image
 from .pdf_utils import convert_pdf_to_images
+from .table_utils import extract_table_from_image
 
 try:
     import pytesseract
@@ -82,7 +83,79 @@ class TesseractEngine(OCREngine):
                         total_conf += conf
                         valid_blocks += 1
                 avg_conf = total_conf / max(valid_blocks, 1) / 100.0
-                return {"model": self.name, "text": full_text.strip(), "confidence": avg_conf, "blocks": text_blocks}
+                
+                # Try table extraction if image might contain a table
+                table_result = None
+                try:
+                    print(f"Attempting table extraction on: {image_path}")
+                    print(f"Total text blocks found: {len(text_blocks)}")
+                    
+                    # Pass the Tesseract blocks for fallback processing
+                    table_extraction = extract_table_from_image(
+                        image_path, 
+                        as_dict=True, 
+                        has_header=True,
+                        tesseract_blocks=text_blocks
+                    )
+                    print(f"Table extraction result: {table_extraction}")
+                    
+                    if table_extraction.get("table_detected"):
+                        table_result = {
+                            "table_detected": True,
+                            "structured_data": table_extraction.get("structured_data", []),
+                            "formatted_data": table_extraction.get("formatted_data", []),
+                            "method": table_extraction.get("method", "unknown"),
+                            "table_rows": len(table_extraction.get("structured_data", [])),
+                            "debug_info": table_extraction.get("debug_info", {})
+                        }
+                        print(f"Table detected with {len(table_extraction.get('structured_data', []))} rows using {table_extraction.get('method', 'unknown')} method")
+                        print(f"Debug info: {table_extraction.get('debug_info', {})}")
+                    else:
+                        table_result = {
+                            "table_detected": False,
+                            "reason": table_extraction.get("error", "No table structure detected"),
+                            "debug_info": table_extraction.get("debug_info", {})
+                        }
+                except Exception as e:
+                    print(f"Table extraction failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    table_result = {"table_detected": False, "error": str(e)}
+                
+                result = {
+                    "model": self.name, 
+                    "text": full_text.strip(), 
+                    "confidence": avg_conf, 
+                    "blocks": text_blocks
+                }
+                
+                if table_result:
+                    result["table_analysis"] = table_result
+                    
+                    # If table detected, replace the main text with structured format
+                    if table_result.get("table_detected"):
+                        structured_data = table_result.get("structured_data", [])
+                        if structured_data:
+                            # Create a cleaner text representation
+                            structured_text = ""
+                            for i, row in enumerate(structured_data):
+                                if i == 0 and len(structured_data) > 5:  # Likely header row if many rows
+                                    structured_text += "TABLE HEADERS:\n"
+                                    structured_text += " | ".join(cell for cell in row if cell) + "\n\n"
+                                    structured_text += "TABLE DATA:\n"
+                                else:
+                                    # Clean row data - only join non-empty cells
+                                    clean_cells = [cell for cell in row if cell.strip()]
+                                    if clean_cells:
+                                        if len(clean_cells) <= 3:  # Key-value pairs or short rows
+                                            structured_text += " | ".join(clean_cells) + "\n"
+                                        else:  # Longer rows
+                                            structured_text += " | ".join(clean_cells) + "\n"
+                            
+                            result["text"] = structured_text.strip()
+                            result["original_text"] = full_text.strip()  # Keep original for reference
+                
+                return result
         except Exception as e:
             return {"model": self.name, "text": "", "confidence": 0.0, "blocks": [], "error": str(e)}
 
