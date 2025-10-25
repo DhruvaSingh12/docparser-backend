@@ -50,8 +50,6 @@
 - [x] **Model Evaluation**
   - [x] Install and test Tesseract: `pip install pytesseract`
   - [x] Install PaddleOCR: `pip install paddlepaddle paddleocr`
-  - [ ] Install TrOCR dependencies: `pip install transformers torch`
-  - [ ] Install DocTR: `pip install python-doctr`
   - [x] Performance benchmark on sample documents
 
 - [ ] **Hindi/Indic Language Support**
@@ -67,6 +65,7 @@
   - [x] Implement preprocessing pipeline with OpenCV
   - [x] Refactor monolithic service into modular package structure
   - [x] Create OCR result standardization format
+  - [x] Add OCR engine selection (Tesseract/PaddleOCR/Auto)
   - [ ] Add batch processing capabilities
 
 - [x] **Preprocessing Pipeline**
@@ -88,6 +87,8 @@
   - [x] Add file type validation (PNG, JPG, PDF)
   - [x] Implement temporary file handling
   - [x] Add PDF processing with multi-page support
+  - [x] Add OCR engine selection in API (auto/tesseract/paddleocr)
+  - [x] Add `/engines` endpoint to show available OCR engines
   - [ ] Add progress tracking for long-running OCR tasks
 
 - [x] **Testing and Validation**

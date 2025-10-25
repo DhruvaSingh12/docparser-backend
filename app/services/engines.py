@@ -28,6 +28,20 @@ class OCREngine:
 
     def process(self, image_path: str) -> Dict[str, Any]:
         raise NotImplementedError
+        
+    def _format_table_text(self, structured_data):
+        """Format table data as readable text"""
+        if not structured_data:
+            return ""
+        
+        formatted_lines = []
+        for row in structured_data:
+            # Filter out empty cells and join with tabs
+            non_empty_cells = [cell.strip() for cell in row if cell.strip()]
+            if non_empty_cells:
+                formatted_lines.append(" | ".join(non_empty_cells))
+        
+        return "\n".join(formatted_lines)
 
 
 class TesseractEngine(OCREngine):
