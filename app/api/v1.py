@@ -1,13 +1,21 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form
 from sqlmodel import Session
 import os
 import tempfile
 from datetime import datetime
 from typing import Dict, Any
+from enum import Enum
 
 from app.db import get_session
 from app.models import ParsedDocument, DocumentType, DocumentStatus
 from app.services.ocr_service import ocr_process
+
+
+class OCREngine(str, Enum):
+    """Available OCR engines"""
+    AUTO = "auto"
+    TESSERACT = "tesseract"
+    PADDLEOCR = "paddleocr"
 
 router = APIRouter()
 
@@ -17,6 +25,13 @@ ALLOWED_EXTENSIONS = os.getenv("ALLOWED_FILE_TYPES", "png,jpg,jpeg,pdf").split("
 
 def validate_file(file: UploadFile) -> None:
     """Validate uploaded file"""
+    # Check filename exists
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="Filename is required"
+        )
+    
     # Check file size
     if file.size and file.size > MAX_FILE_SIZE:
         raise HTTPException(
@@ -25,26 +40,27 @@ def validate_file(file: UploadFile) -> None:
         )
     
     # Check file extension
-    if file.filename:
-        extension = file.filename.split(".")[-1].lower()
-        if extension not in ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
-            )
+    extension = file.filename.split(".")[-1].lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
 
 @router.post("/parse")
 async def parse_document(
     file: UploadFile = File(...),
-    document_type: DocumentType = DocumentType.OTHER,
+    document_type: DocumentType = Form(DocumentType.OTHER),
+    ocr_engine: OCREngine = Form(OCREngine.AUTO),
     session: Session = Depends(get_session)
 ) -> Dict[str, Any]:
     """
     Parse uploaded medical document
     
     Args:
-        file: Uploaded document file
+        file: Uploaded document file (PNG, JPG, JPEG, PDF)
         document_type: Type of medical document
+        ocr_engine: OCR engine to use (auto, tesseract, paddleocr)
         session: Database session
     
     Returns:
@@ -54,8 +70,16 @@ async def parse_document(
         # Validate file
         validate_file(file)
         
+        # Check filename exists
+        if not file.filename:
+            raise HTTPException(
+                status_code=400,
+                detail="Filename is required"
+            )
+        
         # Create temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file.filename.split('.')[-1]}") as temp_file:
+        file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'tmp'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_file:
             # Read and save file content
             content = await file.read()
             temp_file.write(content)
@@ -83,7 +107,9 @@ async def parse_document(
             
             # Process document with OCR
             try:
-                result = await ocr_process(temp_path)
+                # Determine which engine to use
+                engine_name = None if ocr_engine == OCREngine.AUTO else ocr_engine.value
+                result = await ocr_process(temp_path, engine_name)
                 
                 # Update document with results
                 document.raw_ocr_text = result.get("text", "")
@@ -176,3 +202,32 @@ async def list_documents(
         "limit": limit,
         "offset": offset
     }
+
+@router.get("/engines")
+async def get_available_engines() -> Dict[str, Any]:
+    """Get available OCR engines and their status"""
+    try:
+        from app.services.ocr_service import get_ocr_service
+        service = get_ocr_service()
+        available_engines = service.get_available_engines()
+        
+        return {
+            "available_engines": available_engines,
+            "default_engine": service.default_engine.name if service.default_engine else None,
+            "engine_options": [
+                {"value": "auto", "label": "Auto (Best Available)"},
+                {"value": "tesseract", "label": "Tesseract OCR"},
+                {"value": "paddleocr", "label": "PaddleOCR"}
+            ]
+        }
+    except Exception as e:
+        return {
+            "available_engines": [],
+            "default_engine": None,
+            "error": str(e),
+            "engine_options": [
+                {"value": "auto", "label": "Auto (Best Available)"},
+                {"value": "tesseract", "label": "Tesseract OCR"},
+                {"value": "paddleocr", "label": "PaddleOCR"}
+            ]
+        }

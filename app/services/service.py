@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from .engines import TesseractEngine, PaddleOCREngine
 
 _ocr_service = None
@@ -30,13 +30,17 @@ class OCRService:
     def get_available_engines(self) -> List[str]:
         return [engine.name for engine in self.engines]
 
-    def process_with_engine(self, image_path: str, engine_name: str = None) -> Dict[str, Any]:
+    def process_with_engine(self, image_path: str, engine_name: Optional[str] = None) -> Dict[str, Any]:
         if engine_name:
             engine = next((e for e in self.engines if e.name == engine_name), None)
             if not engine:
                 raise ValueError(f"Engine '{engine_name}' not available")
         else:
             engine = self.default_engine
+        
+        if not engine:
+            raise RuntimeError("No OCR engine available")
+        
         return engine.process(image_path)
 
     def process_with_best_engine(self, image_path: str) -> Dict[str, Any]:
@@ -61,7 +65,7 @@ def get_ocr_service() -> OCRService:
     return _ocr_service
 
 
-async def ocr_process(image_path: str, engine_name: str = None) -> Dict[str, Any]:
+async def ocr_process(image_path: str, engine_name: Optional[str] = None) -> Dict[str, Any]:
     service = get_ocr_service()
     if engine_name:
         return service.process_with_engine(image_path, engine_name)

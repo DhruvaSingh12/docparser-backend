@@ -8,6 +8,7 @@ from app.api.v1 import router as v1_router
 from app.db import init_db
 from datetime import datetime, timezone
 
+# Suppress PaddleOCR warnings for cleaner output
 warnings.filterwarnings("ignore", category=UserWarning, module="paddle")
 warnings.filterwarnings("ignore", message=".*ccache.*")
 
@@ -27,7 +28,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title=os.getenv("APP_NAME", "DocParse"),
-    description="AI-powered medical document parsing for CGHS compliance",
+    description="AI-powered medical document parsing",
     version="1.0.0",
     lifespan=lifespan
 )
