@@ -3,7 +3,6 @@ import numpy as np
 from PIL import Image
 from typing import Any
 
-
 def preprocess_image(image_path: str) -> Any:
     """Load and preprocess image for OCR. Returns a numpy array suitable for pytesseract.image_to_data."""
     # Try multiple ways to load image with OpenCV
