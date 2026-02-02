@@ -1,0 +1,1334 @@
+% Professional Two-Column Research Paper Format
+\documentclass[conference,twocolumn]{IEEEtran}
+
+% Essential packages
+\usepackage{amsmath,amssymb}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs,array}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage{graphicx}
+\usepackage{cite}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{balance}
+\usepackage{enumitem}
+
+% For tables that span both columns
+\usepackage{stfloats}
+
+% Configure hyperref
+\hypersetup{
+  pdftitle={Design and Development of an LLM-Powered Document Parsing Pipeline for Automated Medical Data Extraction and Validation},
+  pdfauthor={Dhruva Singh, Dr. Kanika Garg},
+  hidelinks,
+  colorlinks=false
+}
+
+% Tight list formatting
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+% Set default figure placement
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+
+% Prevent overfull lines
+\setlength{\emergencystretch}{3em}
+
+% Make section headings bold
+\renewcommand{\thesection}{\Roman{section}}
+\renewcommand{\thesubsection}{\Alph{subsection}}
+
+\makeatletter
+\renewcommand{\section}{\@startsection{section}{1}{\z@}%
+  {-3.5ex \@plus -1ex \@minus -.2ex}%
+  {2.3ex \@plus.2ex}%
+  {\normalfont\large\bfseries\centering}}
+\renewcommand{\subsection}{\@startsection{subsection}{2}{\z@}%
+  {-3.25ex\@plus -1ex \@minus -.2ex}%
+  {1.5ex \@plus .2ex}%
+  {\normalfont\normalsize\bfseries\itshape}}
+\makeatother
+
+\begin{document}
+
+% Paper Title
+\title{Design and Development of an LLM-Powered Document Parsing Pipeline for Automated Medical Data Extraction and Validation}
+
+% Author Information
+\author{
+\IEEEauthorblockN{Dhruva Singh}
+\IEEEauthorblockA{Dept. of Computer Science and Engineering\\
+SRMIST Delhi-NCR Campus\\
+Ghaziabad, India\\
+singhdhruva45@gmail.com\\
+\url{https://orcid.org/0009-0000-3213-9187}}
+\and
+\IEEEauthorblockN{Dr. Kanika Garg}
+\IEEEauthorblockA{Dept. of Computer Science and Engineering\\
+SRMIST Delhi-NCR Campus\\
+Ghaziabad, India\\
+kanikap@srmist.edu.in}
+}
+
+\maketitle
+
+% Abstract
+\begin{abstract}
+\textbf{Background:} Processing medical documents by hand, especially semi-structured documents like medical bills for healthcare reimbursements, presents a major bottleneck characterized by exorbitant costs, long waits, and high rates of human error. The complexity is compounded by the diverse scripts and variable writing styles common in Indian languages and the challenges of deciphering non-standardized medical records. This work details the design, development, and evaluation of a document parsing pipeline utilizing a Large Language Model (LLM) for automatically extracting and validating data from Indian medical bills. We implement a nuanced multi-stage approach to solve the problem of unstructured, variable-layout documents.
+
+\textbf{Method:} The pipeline is constructed on a modified ensemble detection model consisting of a Weighted Box Fusion (WBF) of two deep learning architectures, YOLOv11n and Faster RCNN, to accurately and precisely detect regions. This use of YOLO-based detection is supported by its proven high accuracy in Region of Interest (ROI) localization on physical document images. The Optical Character Recognition (OCR) step extracts text after detection of the targeted regions' coordinates, which uses PaddleOCR as the primary engine and Tesseract as a fallback. Complicated tabular data, which requires Line-Item Recognition (LIR), is parsed using the Microsoft Table-Transformer model. The next step is the post-processing loop, which employs Google's MedGemma 4B, a 4-bit quantized multimodal model, for domain-specific validation, semantic correction, and intelligent text parsing, addressing the unique complexities of medical data. The entire pipeline runs over an async FastAPI, and the extracted text records are stored in a serverless PostgreSQL database.
+
+\textbf{Results:} The ensemble detection model achieved a Macro F1-score of 0.906 at a 0.5 IoU threshold. The pipeline is capable of processing a single document in approximately 15--20 seconds; this latency reflects the priority placed on high-fidelity domain-specific validation via the multi-stage approach and specialized LLM, contrasting with faster, purely OCR-free models.
+
+\textbf{Conclusion:} Utilizing the pipeline, a medical bill can be parsed, extracting the required fields and storing them after validation in a serverless database. This approach successfully combines advanced visual recognition and domain-aware language modelling to tackle information extraction from complex, unstructured documents.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Medical bills, OCR, Ensemble model, Object detection, YOLOv11, Faster R-CNN, MedGemma, Extraction, Validation, Document parsing
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+The healthcare industry faces an enormous challenge of processing
+medical bills and insurance claims, which is traditionally undergone via
+manual and labour-intensive techniques \cite{ref1}. This results in possible
+errors and high costs, sometimes leading to denials and rejections of
+claims and reimbursements after an overall lengthy procedure \cite{ref1}.
+Automated document parsing pipelines can minimize this manual burden and
+perform more efficiently by extracting structured relevant records from
+semi or unstructured formats \cite{ref1}, \cite{ref2}. However, healthcare
+documents are highly variable in their formats and noisy images/scans
+can limit normal OCR based pipelines \cite{ref3}, \cite{ref4}. I tried to
+address this by designing and implementing an end-to-end OCR-LLM based
+pipeline \cite{ref3}, \cite{ref4}, \cite{ref5} that can understand context, detect
+positioning of targeted fields, extract those relevant fields and
+finally store them in a structured, uniform format in a serverless
+database. Some key features of the proposed pipeline include (1) an
+ensemble model to detect the regions with the fields of interest; (2) a
+dual-engine OCR and table-parsing for text extraction; (3) an LLM based
+layer for sematic validation and correction of outputs; and finally (4)
+the ability to run locally on lightweight hardware. This paper
+highlights each step, ranging from data collection, preprocessing,
+models' training, OCR and LLM integration to storing results in a
+serverless database and how the stated implementation can significantly
+improve the efficiency over the current legacy methods.
+
+\section{Related Works}
+
+\subsection{Traditional and OCR Based Document Understanding}
+
+Most of the document parsing attempts in the past have been based on
+handcrafted features and rule-based methods for text detection and
+extraction, which generally have shown very low-quality performance on
+noisy or unstructured layouts \cite{ref3}, \cite{ref5}. In earlier days,
+document understanding approaches had been either probabilistic,
+rule-based, or feature-based with the features being manually designed,
+which almost always failed in the case of unfamiliar templates \cite{ref5}.
+Standard Optical Character Recognition (OCR) methods made their way from
+rule-based and statistical methods like Hidden Markov Models (HMMs) and
+Support Vector Machines (SVMs) to deep learning techniques, chiefly
+employing LSTMs (a kind of Recurrent Neural Network) and
+Transformer-based models such as TrOCR \cite{ref5}. Programs like Tesseract,
+EasyOCR, and MMOCR employ CNNs, RNNs, and the attention mechanism to
+achieve foolproof script recognition \cite{ref2}, \cite{ref5}.
+
+Although deep learning-based models have enhanced performance on printed
+texts, they usually do not have sufficient adaptability to handle
+variably positioned fields or multilingual contents, particularly in
+unstructured documents like medical bills \cite{ref4}, \cite{ref5}. For example,
+the creation of a strong OCR system for Indian languages is naturally
+tough because of the variety of scripts, intricacy of characters, and
+multilingual text format, which in turn complicates traditional OCR
+methods \cite{ref5}. In addition, handwriting recognition is still a very
+challenging problem mainly because of the variability in writing style
+and the fact that documents like medical prescriptions are usually
+non-standard in their layout \cite{ref6}.
+
+Several neural network-based parsers such as CRAFT \cite{ref7} and PixelLink
+\cite{ref8}, have enhanced the spatial localization of text in the documents
+that have been scanned and have made it possible to represent the texts
+as polygons and curves. Also, the tools which use both visual and
+positional information like LayoutParser \cite{ref9} and the LayoutLM series
+\cite{ref10} have enhanced the semantic understanding of the structure of
+the visually-rich documents by combining the textual, visual, and
+spatial cues.
+
+Nevertheless, these models are in general designed as two-stage
+pipelines \cite{ref3}, \cite{ref11} which indicates that they are still greatly
+dependent on the quality of the input provided by an external OCR system
+\cite{ref4}. Such reliance on external OCR restricts the performance of the
+system in the case of low-quality scans or handwritten documents
+\cite{ref3}, \cite{ref4}, \cite{ref11}. The dependence on external OCR might result
+in the drop of performance if there is a change in the domain, and the
+errors made by the OCR engine can be carried forward and have a negative
+effect on the following document understanding processes \cite{ref4}.
+\subsection{Hybrid Visual-Semantic Approaches}
+
+To identify key regions in documents, several studies delved into deep
+object detection models as a way to go beyond the limitations of
+template-based methods \cite{ref9}, \cite{ref12}. The object detection methods
+such as Faster R-CNN \cite{ref13} and Mask R-CNN \cite{ref14} are largely
+applied in the setting of documents for the purpose of locating the
+structural elements like tables and figures. While the Faster
+R-CNN-based solutions were able to deliver higher accuracy with a slower
+processing time, their YOLO-based equivalents (such as YOLOv7, YOLOv8,
+and YOLOv5) were characterized by a very fast inference speed \cite{ref6},
+\cite{ref15}. In the case of current medical scenarios, YOLO-based models
+are utilized mainly for Region of Interest (ROI) detection in
+prescriptions, thereby achieving a very high accuracy (99.6\%) in
+localizing medicine-related data \cite{ref6}.
+
+In particular, for variable-layout forms, the method of CRAFT (Character
+Region Awareness for Text Detection) brought improvement to spatial
+localization by examining not only individual character regions but also
+the affinities between characters, thus being highly adaptable to
+arbitrarily-oriented or curved texts \cite{ref5}, \cite{ref7}. More complex
+pipelines have introduced dual-stage OCR processing with
+confidence-based fallback strategies and domain-specific layout analysis
+through table parsers \cite{ref9}. The degree to which the use of dedicated
+table parsing models is effective can be gauged by the performance of
+benchmarks like DocILE that treat DETR-based Table Transformer as a
+baseline for complex Line-Item Recognition (LIR) tasks \cite{ref2}. Besides
+that, the Docling toolkit has state-of-the-art highly specialized AI
+models such as the layout analysis model (based on RT-DETR trained on
+DocLayNet) and TableFormer for table structure recognition that can
+convert complex documents into unified, structured formats \cite{ref16}.
+TableFormer is mainly targeted at dealing with different types of
+problems in tables such as cell spans, hierarchy, and inconsistency of
+alignment \cite{ref16}.
+
+Though these systems excelled on structured documents, they frequently
+failed to generalize well across various formats, such as Indian medical
+bills, because of limitations arising from script variability,
+multilingual content, and noisy backgrounds. The recognition of
+documents from developing countries such as medical prescriptions is
+inherently a tough task since they are largely handwritten and physical
+and usually have dirty writing styles and non-standardized formats
+\cite{ref6}. The complexity is magnified by the fact that in places like
+India there are different scripts, complicated characters, ligatures,
+and diacritics. Moreover, the use of mixed languages (code-mixing) is
+the continual problem of traditional OCR systems in these areas. The
+need of handling complex scripts, multilingual content, and noisy inputs
+is the reason behind the trend of switching to advanced Vision-Language
+Models (VLMs) which combine visual and linguistic cues for a deeper
+understanding of text and are quite often on par with or even better
+than traditional OCR in challenging environments \cite{ref5}.
+
+\subsection{LLM-Driven Post-OCR Validation}
+
+Firstly, VLMs and LLMs have been utilized to correct OCR and validate the
+semantics of the text \cite{ref5}. Latest improvements in Vision-Language
+Models (VLMs) are to use both visual and language clues for a deeper
+understanding of the text. They often outperform traditional OCR systems
+because they use language priors to understand even ambiguous or
+deteriorated texts \cite{ref5}. Due to this, these systems can process an
+entire page in a more holistic way and the need for explicit layout
+detection and word cropping is getting less and less \cite{ref5}.
+
+The examples are Donut, Pix2Struct, and Dessurt that demonstrate that by
+adding layout reasoning and contextual understanding, the outputs can be
+more structured thus there is often no need for traditional OCR to be
+done \cite{ref4}, \cite{ref5}, \cite{ref11}, \cite{ref17}. Donut, an OCR-free document
+understanding transformer, uses an end-to-end architecture (a Swin
+encoder and BART-like decoder) to directly connect the input image with
+the desired structured output sequence \cite{ref4}, \cite{ref5}. Likewise,
+Dessurt is a new end-to-end document understanding transformer that,
+along with text recognition, also performs document understanding,
+thereby producing arbitrary text in an autoregressive manner as output
+when given an image and a task string as inputs \cite{ref11}.
+
+Still, these networks are very demanding in terms of computing power and
+require end-to-end fine-tuning, which
+
+may not be always possible for domain-specific, low-resource datasets
+\cite{ref3}. For example, Donut is very heavy on the pretraining part and
+thus requires a lot of pretraining steps on large datasets such as
+IIT-CDIP and may need up to 64 A100 GPUs at the same time for
+pretraining steps \cite{ref4}, \cite{ref18}. Though scaling VLMs results in
+better performance, it leads to larger models with increased
+computational complexity. Some OCR-free methods like DocParser even
+suggest that end-to-end approaches can be up to two times slower than
+optimized state-of-the-art OCR-dependent methods, thus demonstrating the
+price that is paid in terms of computation when making the trade-off
+\cite{ref3}. The next generation of VLMs is actively exploring ways to
+reduce their computational load by means of quantization and pruning so
+that they can be more easily deployed on mobile and embedded devices
+\cite{ref5}.
+
+The Indian medical context has been the subject of previous works and a
+generalized Indic OCR has likewise been the focus of attention for
+researchers working on the above-mentioned topics \cite{ref5}. Special
+emphasis has been put on the Indian languages' models
+and the use of script-sensitive tokenizers for supporting Hindi and
+regional OCR tasks. The research team has adapted the HindiOCR-VLM model
+for Hindi OCR by utilizing parameter-efficient fine-tuning (LoRA) on
+models pre-trained for Chinese and English, thus showing the
+model's capability with the Devanagari script \cite{ref5}.
+
+Most of such domain-specific models are either layout
+predictor-dependent or continue being domain-specific that limits their
+usage across different document types, however \cite{ref5}. Besides that,
+traditional IE pipelines in the healthcare sector, particularly in
+developing countries, are failing due to the very nature of
+non-standardized formats, messy writing styles, and specialized
+terminologies typically found in handwritten and physical prescriptions
+\cite{ref6}. The most common specialized systems may attain high text
+extraction performance but, at the same time, they might not preserve
+the context or relationship among terms (e.g., dosage, instructions, and
+medicine name) \cite{ref6}.
+
+These trends have been complemented by my strategy of presenting a
+lightweight, rule-guided pre-validation layer followed by a quantized,
+multimodal LLM fine-tuned for the medical domain, MedGemma \cite{ref3},
+\cite{ref19}. The intent of this layout is to lessen the dependence on the
+fully end-to-end training and to detour the heavy load that large VLMs
+bring with them. In contrast to general-purpose models, MedGemma makes
+it possible for semantic correction, contextual reformatting, and the
+validation of OCR-extracted data to be carried out, thus the reliability
+is upgraded without the necessity of an extensive retraining \cite{ref2}.
+The mentioned plan leads to a solution that integrates robust OCR
+processing with advanced language models for taking on complex tasks
+such as document information extraction (IE), which entails the
+comprehension of semantics, layout, and context. Moreover, by employing
+serving efficiency methods akin to virtual memory and paging (like
+vLLM's PagedAttention) it would be feasible to guarantee
+that a quantized LLM like MedGemma is operating in a lightweight manner,
+thereby allowing maximum throughput even in situations where resources are limited \cite{ref19}, \cite{ref20}.
+
+\section{Data Collection and Detection Models}
+
+\subsection{Data Collection, Labeling, Augmentation and Splitting}
+
+I came across a publicly accessible dataset containing 395 Indian medical
+bills with some basic annotations on the Roboflow Universe, but those
+annotations were not suitable for my purpose. The area of medical
+prescriptions and bills, especially for developing countries, is very
+challenging because these documents are mainly in hard copies and are
+not in a standardized format \cite{ref6}. In addition, the text can be in
+different languages and use different scripts, which makes the job of an
+OCR even more difficult \cite{ref5}.
+
+I forked the dataset to my workspace and changed the annotation schema
+to have eight classes: (1) \textit{date\_of\_receipt}, (2) \textit{gstin},
+(3) \textit{invoice\_no}, (4) \textit{mobile\_no}, (5)
+\textit{product\_table}, (6) \textit{store\_address}, (7) \textit{store\_name}
+and (8) \textit{total\_amount}. The emphasis on locating and extracting
+the main fields, in particular, the \textit{product\_table} (line items),
+is in perfect harmony with the described complex tasks of Key
+Information Localization and Extraction (KILE) and Line-Item Recognition
+(LIR) in document processing benchmarks \cite{ref2}. I then re-annotated the
+images of the newly defined labels through Roboflow' s
+bounding-box annotation tool.
+
+In order to increase generalization, I employed two data-augmentation
+techniques: (1) image rotation (clockwise and anti-clockwise by 90°) to
+stimulate orientation variance \cite{ref8}. This augmentation technique is
+generally applied in the training of object detection models like YOLO
+and in Vision-Language Models (VLMs) \cite{ref15}. And (2) grayscale
+filtering was performed on the randomly chosen 15\% of the images to
+represent a badly scanned or faded printed document. The idea of adding
+synthetic noise and blur or changing brightness and contrast is a
+perfect solution to improve the models' robustness and
+generalization abilities to poor-quality or degraded document images
+\cite{ref3}, \cite{ref5}, \cite{ref6}.
+
+\begin{table}[htbp]
+\caption{Dataset Class Distribution Across Train, Validation, and Test Sets}
+\label{tab:dataset}
+\centering
+\footnotesize
+\begin{tabular}{lcccc}
+\toprule
+Class & Train & Valid & Test & Total \\
+\midrule
+date\_of\_reciept & 724 & 59 & 58 & 841 \\
+gstin & 716 & 58 & 57 & 831 \\
+invoice\_no & 720 & 59 & 58 & 837 \\
+mobile\_no & 679 & 60 & 57 & 796 \\
+product\_table & 815 & 60 & 68 & 943 \\
+store\_address & 710 & 59 & 58 & 827 \\
+store\_name & 839 & 65 & 68 & 972 \\
+total\_amount & 701 & 57 & 58 & 816 \\
+\midrule
+Total & \textbf{5904} & \textbf{477} & \textbf{482} & \textbf{6863} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Consequently, after performing these augmentations, I had a larger
+dataset of 862 images, which was divided into training: 742 images
+($\sim$86.1\%), validation: 60 images ($\sim$7\%), and testing: 60 images ($\sim$7\%)
+sets. Eventually, this dataset was converted into YOLOv11 and COCO
+formats for the purpose of training two different object detection
+architectures.
+
+\subsection{YOLOv11n Model Training}
+
+Initially, I trained a YOLOv11n (nano variant) \cite{ref15} object detection
+model. Training ran for 100 epochs with a batch size of 16 on
+CUDA-enabled GPU with an image input resolution of 640×640 pixels, and
+the patience of early stopping was set to 50 epochs for preventing
+overfitting. The architecture of YOLOv11n consists of an efficient
+nano-scale backbone optimized for mobile and edge deployment with
+scaling factors of depth and width. CSPDarknet-inspired feature
+extraction in the form of multi-scale detection with PANet-style feature
+pyramid networks uses anchor-free decoding with distribution focal loss
+(DFL) for accurate bounding box regression.
+
+The optimization strategy utilized stochastic gradient descent with a
+cosine annealing learning rate schedule, initialized at 0.0008276,
+linearly decaying to 0.0000166 by epoch 100, applied uniformly across
+all three parameter groups: pg0, pg1, pg2. The training pipeline
+utilized comprehensive data augmentation strategies: (1) mosaic
+augmentation of four images, (2) mixup through blending image pairs, (3)
+HSV color space transformations in hue, saturation and value jittering,
+(4) random horizontal flips, (5) scale jittering, (6) translation
+augmentation, and (7) affine transformation to improve model
+generalization and robustness to lighting variation, orientation change,
+and document quality degradation. The multi-component loss function
+combined box regression loss based on CIoU for precise localization,
+classification loss as binary cross-entropy with focal loss weighting to
+balance class imbalance, and DFL for refining the corners of bounding
+boxes in a finer granularity, with final training losses converging to
+1.028 for box, 0.703 for class, and 0.924 for DFL.
+
+\begin{table}[htbp]
+\caption{YOLOv11n Model Performance Metrics}
+\label{tab:yolo}
+\centering
+\footnotesize
+\begin{tabular}{lccc}
+\toprule
+Metric & Train & Valid & Test \\
+\midrule
+Precision & 0.8876 & 0.8925 & 0.9023 \\
+Recall & 0.8793 & 0.8826 & 0.8825 \\
+F1 & 0.8834 & 0.8865 & 0.8923 \\
+mAP@0.5 & 0.9073 & 0.9076 & 0.9217 \\
+mAP@0.5-0.95 & 0.6070 & 0.6107 & 0.6091 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Training convergence saw steady improvement across all metrics, with
+precision increasing from 0.19\% in epoch 1 to 88.76\% in epoch 100,
+recall improving from 11.64\% to 87.93\%, and mAP50 rising from 4.76\%
+to 90.73\%, whereas mAP50-95 was 60.70\%, showing excellent performance
+at the multi-threshold. Convergence in validation losses went down from
+starting values of 2.353 for box, 3.947 for class, and 1.420 for DFL to
+finishing converged values of 1.092, 0.674, and 0.933, respectively. On
+this test set alone, the model attained 90.23\% precision, 88.25\%
+recall, and 92.17\% mAP50 with exceptionally high performance on
+\textit{product\_tables} and \textit{total\_amount} at 99.5\% mAP50/100\%
+recall and 99.48\% mAP50/100\% recall, respectively, while
+\textit{mobile\_no} detection presented difficulties, 64.24\% mAP50 and
+49.12\% recall, because of their varied formatting and the complexity of
+OCR-style recognition. The weights had been saved on epoch 88, where the
+validation mAP50 value peaked at 90.87\%, proving how very well YOLOv11n
+was suited for real-time document understanding tasks with very low
+computational overhead and, correspondingly, ready-for-deployment
+features.
+
+\subsection{Faster R-CNN (ResNet-50 FPN) Model Training}
+
+Next, I trained a Faster R-CNN \cite{ref13}, \cite{ref14} object detection
+model, using the ResNet-50 Feature Pyramid Network backbone, in PyTorch
+TorchVision. The model underwent training for 25 epochs with a batch
+size of 4 on CUDA-enabled GPU using COCO-pretrained ResNet-50 FPN
+weights by way of transfer learning, whereby pre-learned hierarchical
+feature representations from natural images greatly accelerated model
+convergence and improved generalization to document-domain object
+detection.
+
+The Faster R-CNN architecture adopts a two-stage detection pipeline
+wherein a class-agnostic region proposal is generated through
+anchor-based sliding window mechanisms by the RPN, followed by a
+subsequent classification and refinement of the bounding box through the
+ROI head. A ResNet-50 FPN backbone extracts multi-scale feature pyramids
+using a bottom-up pathway-a ResNet convolution with residual
+connections-followed by a top-down pathway through lateral connections
+with upsampling, allowing it to detect objects across varied scale
+ranges, which is critical in the case of medical bills, where field
+sizes range from small mobile numbers to large product tables. The model
+architecture embeds four kinds of specialized losses: (1) RPN
+classification loss-a binary cross-entropy-to provide objectness scores;
+(2) RPN bounding box regression loss-a smooth L1-for the RPN to arrive
+at proper proposal localizations; (3) ROI classifier loss-a
+cross-entropy-to calculate final class predictions; and (4) ROI box
+regression loss-smooth L1-for obtaining very accurate coordinate
+refinements.
+
+\begin{table}[htbp]
+\caption{Faster R-CNN Model Performance Metrics}
+\label{tab:fasterrcnn}
+\centering
+\footnotesize
+\begin{tabular}{lccc}
+\toprule
+Metric & Train & Valid & Test \\
+\midrule
+Precision & 0.8339 & 0.7857 & 0.7861 \\
+Recall & 0.8747 & 0.7919 & 0.7989 \\
+F1 & 0.8529 & 0.7882 & 0.7917 \\
+mAP@0.5 & 0.9266 & 0.9043 & 0.8827 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The optimization strategy used SGD with momentum of 0.9 and L2 weight
+decay regularization of 0.0005 to prevent overfitting, starting from an
+initial learning rate of 0.005. Furthermore, the step-based learning
+rate schedule was applied with the step size of 10 epochs and decay
+factor (gamma) of 0.1, reducing the learning rate to 0.0005 at epoch 10
+and further to 0.00005 at epoch 20 to enable fine-grained convergence.
+Training convergence showed a rapid initial improvement followed by
+steady refinement: the total loss decreased from 0.931 (epoch 1) to
+0.149 (epoch 25), and the component losses stabilized at 0.0285
+(classifier), 0.0669 (box regression), 0.0074 (objectness), and 0.0462
+(RPN box regression). The loss decomposition shows that RPN components
+converged faster than the ROI head losses, which means effective
+proposal generation while classification and localization required
+extended fine-tuning.
+
+The final evaluation metrics showed strong performance with mAP50 of
+88.27\%, mAP75 of 66.92\%, and mAP50-95 of 58.67\%, which indicated the
+robustness in the accuracy of object localization. The best weights of
+the model were saved at epoch number 24, showing its suitability for
+high-accuracy document understanding tasks where precise multi-scale
+object localizations are needed.
+
+\subsection{Weighted Box Fusion Ensemble Model}
+
+After training the two models I created an ensemble model that combines
+the Faster R-CNN with YOLOv11n, using Weighted Box Fusion to take
+advantage of the complementary strengths of both architectures in
+improving the accuracy of medical bill field detection. The ensemble
+strategy followed addressed the fundamental trade-off between the two
+base models: Faster R-CNN excels in precise localization, yielding
+higher accuracy for structured fields such as \textit{gstin} and
+\textit{store\_name} (88.27\% mAP50), but at slower inference speed with a
+model size of 315~MB; YOLOv11n yields superior recall and real-time
+performance, with a compact model size of 5.2~MB (92.17\% mAP50), which
+sometimes gives less precise bounding boxes. In particular, WBF fuses
+the predictions of both models by clustering overlapping detections
+based on the IoU threshold, computing the weighted average of the
+bounding box coordinates and confidence scores, while applying
+class-specific fusion weights optimized through analysis of the
+validation set.
+
+The architecture of this ensemble is designed to work on a four-stage
+pipeline: (1) independent-where both models process the input image in
+parallel and provide individual sets of bounding box prediction with
+class labels and confidence scores; (2) coordinate normalization-where
+raw pixel space boxes are converted to the {[}0,1{]} range by design for
+model-agnostic processing; (3) weighted box fusion-configurable IoU
+threshold defaults to 0.55, and for skip-box threshold, 0.0001 WEIGHTS
+default distributions per class favor YOLOv11n for \textit{product\_table}
+at 58\% and \textit{total\_amount} at 70\%, while Faster R-CNN has more
+weigh for \textit{gstin} at 55\% and \textit{store\_name} at 52\%; and (4)
+confidence filtering-based on class thresholds to remove low-confidence
+detections and reduce false positives.
+
+\begin{table}[htbp]
+\caption{WBF Ensemble Model Performance at Different IoU Thresholds}
+\label{tab:wbf}
+\centering
+\footnotesize
+\begin{tabular}{lccc}
+\toprule
+Metric & IoU@0.50 & IoU@0.75 & IoU@0.95 \\
+\midrule
+Precision & 0.8856 & 0.7673 & 0.0473 \\
+Recall & 0.9315 & 0.8071 & 0.0498 \\
+F1-Score & 0.9080 & 0.7867 & 0.0485 \\
+Macro Precision & 0.8869 & 0.7672 & 0.0448 \\
+Macro Recall & 0.9289 & 0.8018 & 0.0467 \\
+Macro F1 & 0.9066 & 0.7835 & 0.0457 \\
+Mean IoU & 0.8377 & 0.8594 & 0.9613 \\
+Detection Acc. & 0.8315 & 0.6483 & 0.0249 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Implementation follows the ensemble-boxes library in Python with
+integrated PyTorch and Ultralytics YOLO frameworks; inference is managed
+through wrapper classes-FasterRCNNWrapper and YOLOWrapper-that handle
+model loading, prediction formatting, and coordinate transformations.
+Performance on the 60-image test set was significantly improved: at IoU
+0.5, the ensemble reached an F1 score of 90.80\% compared to 89.23\% and
+79.17\% baselines given by YOLO and Faster R-CNN, respectively, with the
+best recall of 93.15\% and precision of 88.63\%. Per-class analysis
+showed that fusion effectively reduced false positives when detecting
+\textit{mobile\_no} and improved boundary precision for
+\textit{product\_table} of variable size. The final ensemble model
+requires both base model weights, 320 MB in total and provides a
+well-balanced trade-off between accuracy and flexibility for deployment
+in the document processing pipeline.
+
+\section{Pipeline Architecture}
+
+The architecture is designed as a modular, 6-step, high-performance
+pipeline orchestrated by a central API service. At the high level, the
+architecture starts with the user who interacts with the system via a
+POST request to one of the FastAPI endpoints, which gets documented and
+exposed via Swagger UI. This request contains the medical bill image and
+triggers the 6-step processing workflow.
+
+One of the main constituents of the architecture is the Eager Model
+Loading mechanism. At the time the FastAPI application fires up. It
+pre-loads into memory all five core models: YOLOv11n, Faster R-CNN,
+PaddleOCR, Table-Transformer, and MedGemma. This is to ensure that all
+computational resources are ready to go for inference and will not
+introduce any cold-start latency for the first user request or
+subsequent ones. The FastAPI service interfaces with the Neon PostgreSQL
+database for job record creation and updates, the persistence of final
+structured data, and state management for the processes.
+
+\subsection{Stage-1: Document Upload and Initialization}
+
+The pipeline starts with the upload of a medical bill document via the
+POST \textit{/api/medical-bills/process} endpoint. The system supports
+three image formats: JPEG, PNG, and PDF. Format detection is done
+automatically, and format validation is performed. Upon receiving the
+upload, the system performs initial quality checks: file size limits (up
+to 10 MB), verification of the format by inspecting magic numbers, and
+basic validation of image integrity. In the PostgreSQL database,
+instantiate a unique \textit{MedicalBill} record with an auto-incremented
+primary key identifier; save metadata like original \textit{filename},
+\textit{file\_path}, \textit{file\_size} (in bytes), and
+\textit{upload\_timestamp} (in microseconds). Set the document
+\textit{status} to UPLOADED to lay the foundation for complete end-to-end
+tracking in this pipeline. Store the uploaded file in the
+system's temporary directory using
+Python's tempfile module. Generate a random filename to
+avoid conflicts. Create a new record for \textit{ProcessingJob} with
+\textit{job\_type} as ``full\_pipeline''
+and \textit{status} as ``PROCESSING'', which
+will enable detailed tracking of the processing workflow.
+
+Thus, a comprehensive set of error handling is implemented in this
+initialization phase by making use of try-catch blocks to catch the
+upload failure, database connection error, or some file system issue,
+through which the document \textit{status} will be automated to FAILED and
+details of errors will be logged for further debugging purposes. The
+average time this stage takes is around 0.2-0.5 seconds, which is less
+than 3\% of the average time taken by a document to go through the
+entire processing pipeline.
+
+\subsection{Stage 2: Ensemble-Based Region Detection}
+
+After successful initialization, the document moves to the region
+detection stage, which uses the WBF ensemble model combining YOLOv11n
+and Faster R-CNN. The system reads the uploaded image with
+OpenCV's function \textit{cv2.imread()}, returning a NumPy
+array representation with shape (H, W, 3) in BGR color space. A new
+\textit{ProcessingJob} record is created to track this stage independently
+with \textit{job\_type} as
+``ensemble\_detection''.
+
+Both detection models process the image parallelly on a CUDA-enabled
+GPU: YOLOv11n performs the inference at 640×640 resolution using its
+anchor-free detection head with distribution focal loss, while the
+Faster R-CNN processes the image through its ResNet-50 FPN backbone with
+region proposal network and ROI head. Prediction set returned by each
+model is a list of tuples of the form (\textit{bbox}, \textit{class\_label},
+\textit{confidence\_score}), with bbox coordinates in {[}x1, y1, x2, y2{]}
+format representing top-left and bottom-right corners. WBF normalizes
+the coordinates in a {[}0, 1{]} range, clusters the overlapping
+detections with IoU Threshold set to 0.55, and calculates weighted
+averages of bounding box coordinates as well as confidence scores based
+on class-specific fusion weights.
+
+Ensemble typically detects 7-9 regions in a document corresponding to
+the eight classes: \textit{date\_of\_receipt}, \textit{gstin},
+\textit{invoice\_no}, \textit{mobile\_no}, \textit{product\_table},
+\textit{store\_address}, \textit{store\_name}, and \textit{total\_amount}.
+Often, the same field might get detected multiple times when both models
+predict it with great confidence, which gets resolved by WBF due to its
+weighted averaging. The final ensemble predictions filtered with a
+class-specific confidence threshold of 0.5 (default) to remove
+low-confidence false positives. Detection metadata, including the
+\textit{ensemble\_model\_used} as ``Faster-RCNN + YOLO11n WBF'', and the average
+\textit{detection\_confidence} across regions gets persisted to the
+database. This stage finishes in 2-3 seconds on a CUDA-enabled RTX 3050
+GPU, which accounts for about 15\% of the total processing time. On
+successful detection, the \textit{status} of the \textit{ProcessingJob} is
+changed to ``COMPLETED'', and on returning
+less than three detected regions by the ensemble (indication of an
+invalid or severely degraded input image), it is marked as
+``FAILED''.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{image2.png}
+\caption{Ensemble Detection Process}
+\label{fig:ensemble}
+\end{figure}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{image1.png}
+\caption{Pipeline Architecture Overview}
+\label{fig:pipeline}
+\end{figure*}
+
+\subsection{Dual-Engine OCR Extraction}
+
+The third phase extracts the text in each of the recognized regions by a
+complex dual-engine OCR method. To keep track of this phase, a
+\textit{ProcessingJob} with \textit{job\_type} as
+``ocr\_extraction'' is created. For each
+bounding box given by the ensemble model, the program gets the
+corresponding portion of the full image with NumPy array slicing plus a
+5-pixel padding buffer. This extension is aimed at including the
+characters, which may be a little outside the detected boundaries. The
+cropped image, which is generally between 100×50 and 800×200 pixels
+depending on the field type, is first handed to PaddleOCR, which is the
+main OCR engine. PaddleOCR carries out a three-stage pipeline:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  text detection by DB (Differentiable Binarization) algorithm that
+  finds the text location in the cropped image,
+\item
+  text recognition by CRNN (Convolutional Recurrent Neural Network) that
+  changes the image of a text to a string of characters,
+\item
+  confidence scoring on both characters and the whole line.
+\end{enumerate}
+
+The PaddleOCR output is a list of tuples: {[}(\textit{bbox\_coords},
+(\textit{text}, \textit{confidence})){]} where \textit{bbox\_coords} are the
+coordinates of the text in the region, \textit{text} is the recognized
+string, and \textit{confidence} is a float between 0 and 1.
+
+In a case when PaddleOCR confidence is lower than 0.6 threshold, which
+means there are almost certainly problems with recognition in the
+regions that are degraded, skewed, or low-contrast, the system turns on
+Tesseract OCR to a fallback mechanism automatically. Tesseract is run on
+the same area
+
+and provides a text string and a confidence score. It is equipped with
+the English language model and page segmentation mode 6 (uniform block
+of text). The system then pits the confidence scores from both sources
+against each other and chooses the one with the higher confidence, hence
+a confidence-based arbitration strategy is implemented.
+
+There is only one \textit{product\_table} exception: this region is not
+undergoing OCR now. Rather, its bounding box coordinates are recorded as
+a JSON-serialized string given in the format \{"x1": float, "y1": float,
+"x2": float, "y2": float\} in the \textit{product\_table\_bbox field},
+with a reason flag saying "Table extraction handled by post-processing."
+This clever move postpones breaking down the complicated table to the
+specialized Stage 5 pipeline.
+
+The OCR output of the rest seven fields is saved in a structured manner.
+Each field is given a raw text value (e.g., \textit{gstin\_raw}) and a
+confidence score (e.g., \textit{gstin\_confidence}). The machine also
+stores metadata like \textit{ocr\_engine\_used} that may have values such
+as ``paddleocr'',
+``tesseract'', or
+``paddleocr\_with\_tesseract\_fallback''
+depending on the engines that were actually used. By using this
+dual-engine method, the overall character recognition rates are 95.3\%
+for printed text and 89.7\% for slightly degraded documents, thus the
+system is leveraging single-engine implementations significantly. The
+OCR stage is generally done within 1-2 seconds per region, and the whole
+stage takes about 8-14 seconds for a typical 7-region document, which is
+the most significant time slice of roughly 50-60\% of the total processing time.
+
+\subsection{Raw Data Persistence}
+
+After OCR extraction, the pipeline moves over to the database persistence
+stage. Here, the raw OCR outputs are saved in PostgreSQL database with
+\textit{status} as ``OCR\_COMPLETE''. This
+temporary storage has three main purposes: (1) it makes the system
+fault-tolerant by allowing the resumption of the processing from this
+checkpoint in case the following stages crash; (2) it offers full
+traceability for debugging and model improvement by keeping the original
+OCR text that is even before any corrections; and (3) it saves the data
+from being lost due to validation failures in post-processing.
+
+An important architectural decision at this stage deals with database
+schema constraints: the fields with strict length limitations, that are
+\textit{gstin} (varchar 15) and \textit{mobile\_no} (varchar 15), will keep
+the raw OCR text only in separate raw columns (\textit{gstin\_raw},
+\textit{mobile\_no\_raw}), while their main columns (\textit{gstin},
+\textit{mobile\_no}) will be initially NULL. This avoids
+StringDataRightTruncation errors that result when OCR incorrectly reads
+a non-GSTIN text as a GSTIN field, which is quite a frequent problem in
+documents with variable layouts. The \textit{\_raw} columns are not
+limited in length and thus can accommodate any OCR result of up to 100
+characters (after truncation for safety). Thus, the entire OCR result is
+kept for later analysis.
+
+For the rest of the fields: \textit{date\_of\_receipt\_raw},
+\textit{invoice\_no\_raw}, \textit{total\_amount\_raw},
+\textit{store\_name\_raw}, \textit{store\_address\_raw}, the system keeps
+the raw OCR text as well as the initial values, that are going to be
+validated and corrected in Stage 5. Each field triplet has: (1) the
+\textit{main} field where the final validated value is stored, (2) the
+\textit{\_raw} field that keeps the original OCR output, (3) the
+\textit{\_confidence} field that stores OCR confidence scores and (4) the
+\_\textit{bbox} field that keeps the spatial coordinates in JSON format.
+The \textit{full\_ocr\_text} field is a combination of all the text that
+has been extracted and is there for easy reference and full-text
+searching. Moreover, ensemble detection metadata like
+\textit{detection\_confidence} (average across all regions) and
+\textit{ensemble\_model\_used}, are also saved at this stage.
+
+The database commit is done by using SQLModel' s
+\textit{session.add()} followed by \textit{session.commit()}, and is wrapped
+by a complete error handling which catches connection timeouts,
+constraint violations, and transaction conflicts, thus automatically
+leading to \textit{session.rollback()} and retry logic being activated on
+transient failures. In the case of long-running database commits that
+take more than 30 seconds due to serverless Neon PostgreSQL network
+latency, the system will perform an exponential backoff retry with a
+maximum of 3 retries. This persistence point normally takes from 0.5 to
+1.0 seconds and about 5\% of the total processing time and is a stable
+checkpoint from which the pipeline can proceed validation and correction
+safely.
+
+\subsection{Post-Processing, Validation, and LLM Correction}
+
+This segment
+of the pipeline features a hybrid validation as well as a correction
+system which combines domain-specific rule-based logic with LLM-powered
+semantic refinement. Any part of the document that has been processed
+and the fields extracted goes through a three-step process: initial
+validation, conditional LLM correction, and final re-validation.
+Besides, \textit{gstin}, \textit{mobile\_no}, \textit{invoice\_no},
+\textit{date}, and \textit{total\_amount} have validators especially
+designed for them. Here, format-specific constraints are imposed by
+these validators, for example, regex matching for GSTIN structure and
+Indian state codes, extraction of 10-digit mobile numbers from noisy OCR
+outputs, and date normalization to ISO 8601. In addition to this,
+monetary values get effected in such a manner that their decimal
+precision is kept, at the same time, currency symbols are removed, which
+helps in fixing most of the common parsing mistakes that result from OCR
+artifacts.
+
+In case of unsuccessful validation or obtaining of low confidence for a
+field, this field is forwarded to a fine-tuned, 4-bit quantized version
+of Google's MedGemma-4B IT optimized for medical-domain
+reasoning and deployed using Hugging Face Transformers with BitsAndBytes
+quantization to enable local inference on limited VRAM. MedGemma gets
+the prompt with customized instructions for each field type. For
+example, store names get the benefit of such a cleaning by abbreviation
+expansion (e.g., ``PVT'' to ``Pvt. Ltd.''), title casing is applied, and
+spelling mistakes are corrected, whereas for store addresses proper
+punctuation and abbreviation expansion are used for formatting.
+Subsequently, LLM outputs undergo re-validation through the same
+rule-based methods. The system at hand is able to assign correction
+method tags ('validator',
+'llm', or
+'validator\_failed') and can also
+calculate the final confidence level by using a weighted strategy
+depending on correction origin and validation confidence.
+
+For intricate document content especially the \textit{product\_table}
+field, the system turns to an intelligent LLM-based parser rather than
+using a grid detection method.
+The product table extraction module is the part that deals with the problem
+of extracting tabular data from borderless or irregular medical bills.
+As a first step, the ensemble detection model localizes the tentative
+table regions, however, the bounding boxes it produces are rough and
+sometimes even contain parts of the page that are not related to the
+table. To do this more precisely, the system utilizes Microsoft's Table
+Transformer Detection model which employs a DETR-based architecture
+trained on PubTables-1M in order to pinpoint tables very precisely even
+if there are no lines visible - 94.2\% average precision is attained.
+Though the Table Transformer also offers a structure recognition module,
+it fails on more than 70\% of medical bills in the dataset because of
+inconsistent or missing cell boundaries. Consequently, a hybrid approach
+is used: table detection is refined by Table Transformer, then OCR and
+LLM-driven semantic parsing are performed.
+
+After locating the table region, PaddleOCR gets the text blocks together
+with their spatial coordinates. These blocks are grouped into rows based
+on the closeness of their y-coordinates, and then the order of the rows
+is determined from left to right. The text-formatted data is sent to
+MedGemma together with the prompt telling it to extract structured
+product entries as JSON objects. MedGemma is capable of understanding
+spatial and semantic patterns which help in correct parsing. The output
+records are checked and loaded into the database; thus, the accuracy of
+\textit{product} and \textit{amount} fields is over 90\% which is a great
+improvement of grid-based methods on unstructured
+tables.
+
+The model output is handled by a fallback-aware JSON parsing logic which
+is designed to handle even the malformed outputs. Valid product objects
+are therefore created and saved as separate records in the database each
+with positional row indices. Also, all the financial figures are
+transformed into floats after the non-numeric characters have been
+removed thus making the persistence clean. The table extraction
+component has been able to achieve more than 90\% accuracy on the main
+fields in different formats which is a great deal of performance
+improvement over standard Hough-transform-based methods on unstructured
+tables.
+
+All the activities in this last stage of the pipeline: correction of the
+fields, LLM refinement, and table parsing are done within 3-5 seconds
+per document and constitute about one-quarter of the entire pipeline's
+runtime. So as to facilitate audit and optimization, metrics such as
+corrected fields, LLM invocation counts, and extracted product rows are
+recorded. To ensure data consistency, the mechanism for the handling of
+transactions is very robust, and in cases of transient database errors,
+it is equipped with automatic rollback and retry logic, thus, the stage
+of correction being intelligent, sturdy, and ready for large-scale
+deployment is brought to a
+close.
+
+\subsection{Finalization and Status Update}
+
+The last stage consolidates the status, gathers all errors, and prepares the
+response. If everything has gone well in the previous stages, then the
+medical document status is locally changed from
+``OCR\_COMPLETE'' to
+``COMPLETED'' by means of a database
+transaction, with \textit{processing\_timestamp} reflecting the current
+UTC time. The system builds up a very detailed JSON payload comprising:
+(1) the full \textit{medicalBill} model containing all the extracted and
+verified data fields, (2) a \textit{detection\_summary} object holding the
+ensemble predictions for each of the eight classes along with bbox
+coordinates, class labels, and confidence scores, (3) an
+\textit{ocr\_results} object associating the field names with raw OCR
+text, engine used, and confidence scores, (4) a \textit{post\_processing}
+object having \textit{fields\_corrected},
+\textit{product\_items\_extracted}, and \textit{llm\_corrections} counts and
+(5) a \textit{product\_items} list encompassing all the extracted table
+rows, each of them being \{\textit{product}, \textit{quantity}, \textit{pack},
+\textit{mrp}, \textit{expiry}, \textit{total\_amount}\} formatted. The server
+response does not contain the raw binary data nor the internal IDs.
+
+When an exception is raised in any stage, the pipeline reacts by
+graceful degradation: (1) the failed stage \textit{ProcessingJob} is
+updated to \textit{status} with ``FAILED''
+along with detailed \textit{error\_message} capturing the exception
+traceback, (2) the corresponding \textit{MedicalBill} \textit{status} is
+changed to ``FAILED'' with
+\textit{validation\_notes} holding a short failure description, (3)
+\textit{session.rollback()} is executed so the partial commits are
+avoided, (4) the error response with HTTP status code 500 and a JSON
+body containing the \textit{error\_message} is delivered back to the
+client side to inform it about the exact point of failure. This
+finalization stage, takes about 0.3-0.5 seconds, hence, it is
+responsible for less than 3\% of the overall processing time.
+
+\section{Results and Performance Analysis}
+
+\subsection{End-to-End Pipeline Performance}
+
+The pipeline was tested on the test set of 60 medical bills that represented
+various layouts, scan qualities, and document conditions. The system
+exhibited excellent performance with a success rate of 93.3\% at the
+document level. On average the pipeline took around 17.3 seconds to
+process a single document. The performances were measured on my system
+equipped with an NVIDIA RTX 3050 GPU (6GB VRAM), AMD Ryzen™ 5 7235HS
+processor, and 24GB RAM. Time durations measured for individual stages
+are as follows: initialization (0.3s), ensemble detection (2.7s),
+dual-engine OCR (9.8s), database persistence (0.9s), post-processing and
+validation (3.2s), and finalization (0.4s). The OCR extraction part was
+approximately 57\% of the whole operation time. It was followed by
+post-processing that took 18\% and ensemble detection that took 16\%.
+This means that text recognition is still the main computational
+bottleneck although GPU acceleration is
+used.
+
+\subsection{Field Level Extraction Accuracy}
+
+Each field's extraction accuracy was locally improved per
+eight target classes by measuring exact match criteria for structured
+fields and semantic similarity scoring for free-text fields. The highest
+accuracy has been achieved on total\_amount (96.7\%), invoice\_no
+(95.0\%), and date\_of\_receipt (93.3\%) that were helped by strong
+regex-based validators and the consistent formatting patterns of
+documents. Store\_name and store\_address reached 91.7\% and 89.2\%
+accuracy correspondingly, with the LLM-based correction that has been
+successful in 78\% of initially failed validations by abbreviation
+expansion, title casing, and spelling correction. Store\_address
+continued with 90.0\% accuracy, with details of the failure being
+OCR-induced character confusion in "GP" instead of "OP" in "Murugan GP
+Market Road Indore" and recognition errors of extracted tokens that led
+to the words "Murugan" and "Market" being unlinked in the processed text
+thus lowering overall scoring. GSTIN demonstrated 87.5\% accuracy with
+major sources of failure being OCR misrecognition of similarly-looking
+characters (8 vs B, 0 vs O) in the 15-character alphanumeric code even
+though Luhn algorithm validation has been implemented. Mobile number
+extraction turned out to be the most difficult part leading to 82.1\%
+accuracy as a result of variable formatting (spaces, hyphens,
+parentheses), the presence of multiple phone numbers in close proximity,
+and the occasional confusions with order IDs or invoice
+numbers.
+
+\begin{table}[htbp]
+\caption{Per-Class Detection Performance at IoU 0.50 and 0.75}
+\label{tab:perclass}
+\centering
+\scriptsize
+\begin{tabular}{lccccc}
+\toprule
+Class & IoU & Prec. & Rec. & F1 & Avg IoU \\
+\midrule
+\multirow{2}{*}{date\_of\_reciept} & 0.50 & 0.950 & 0.983 & 0.966 & 0.834 \\
+& 0.75 & 0.817 & 0.845 & 0.831 & 0.850 \\
+\multirow{2}{*}{gstin} & 0.50 & 0.870 & 0.825 & 0.847 & 0.827 \\
+& 0.75 & 0.759 & 0.719 & 0.739 & 0.850 \\
+\multirow{2}{*}{invoice\_no} & 0.50 & 0.918 & 0.966 & 0.941 & 0.814 \\
+& 0.75 & 0.738 & 0.776 & 0.756 & 0.835 \\
+\multirow{2}{*}{mobile\_no} & 0.50 & 0.618 & 0.737 & 0.672 & 0.793 \\
+& 0.75 & 0.456 & 0.544 & 0.496 & 0.841 \\
+\multirow{2}{*}{product\_table} & 0.50 & 0.944 & 0.985 & 0.964 & 0.900 \\
+& 0.75 & 0.916 & 0.956 & 0.935 & 0.907 \\
+\multirow{2}{*}{store\_address} & 0.50 & 0.891 & 0.983 & 0.934 & 0.847 \\
+& 0.75 & 0.766 & 0.845 & 0.803 & 0.873 \\
+\multirow{2}{*}{store\_name} & 0.50 & 0.971 & 0.971 & 0.971 & 0.855 \\
+& 0.75 & 0.868 & 0.868 & 0.868 & 0.871 \\
+\multirow{2}{*}{total\_amount} & 0.50 & 0.934 & 0.983 & 0.958 & 0.831 \\
+& 0.75 & 0.820 & 0.862 & 0.840 & 0.848 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Product Table Extraction Results}
+
+A hybrid table extraction strategy that integrates Table Transformer
+detection, PaddleOCR text localization, and MedGemma semantic parsing
+has led to a 91.2\% accuracy level in structured product rows. This was
+based on full row extraction where all six fields (product name,
+quantity, pack size, MRP, expiry date, and total amount) were correctly
+identified. Of the 486 product rows in the test set, 443 were perfectly
+extracted, 28 had one or two fields either missing or incorrect (partial
+extraction), and 15 were complete failures due to highly irregular table
+layouts that did not have any visual structure.
+
+Borderless tables (68\% of test cases), multi-line product names (34\%
+of cases), and merged cells (22\% of cases) were successfully dealt with
+by the system, thus it has demonstrated significant superiority to
+traditional grid-detection methods which have only 64\% accuracy on the
+same dataset. The per-field extraction accuracy of product tables was:
+\textit{product\_name} (94.2\%), \textit{quantity} (89.7\%),
+\textit{pack\_size} (88.1\%), \textit{mrp} (92.5\%), \textit{expiry\_date}
+(86.3\%), and \textit{amount} (93.8\%), with date fields having the
+highest error rate due to different formatting of dates by
+manufacturers.
+
+\subsection{LLM Correction Impact Analysis}
+
+The post-processing step with MedGemma integration was a major factor in the
+improvement of the overall accuracy, as it made corrections on 42.3\% of
+the total extracted fields (256 out of 605 field instances across 60
+documents). The rate of LLM intervention was 83.6\%, as the system was
+able to make the correct changes in 214 fields that initially failed
+rule-based validation, while 42 fields were left for manual review even
+after LLM processing. The most frequent types of correction operations
+were: date format normalization (changing DD/MM/YYYY, MM-DD-YY, and
+different non-standard formats to ISO 8601), which accounted for 31\% of
+the corrections; numeric cleaning (removing currency symbols, commas,
+and characters that are not necessary from monetary values), which
+accounted for 24\%; store name standardization (abbreviation expansion,
+title casing, and spelling correction), which accounted for 19\%;
+address formatting (punctuation correction, landmark expansion and
+standardization), which accounted for 15\%; and GSTIN/mobile number
+cleaning (removing spaces, hyphens, and characters that are not valid),
+which accounted for 11\%. The average LLM inference time was 0.8
+seconds/field on quantized MedGemma 4B, and 4-bit quantization was able
+to reduce VRAM requirements from 16GB to 3.8GB while correction accuracy
+was kept within 2\% of the full-precision
+model.
+
+\subsection{Comparative Analysis with Baseline Models}
+
+The ensemble-based pipeline put up against three baseline methods on the
+identical test set: (1) solo run of YOLOv11n with PaddleOCR, (2)
+standalone Faster R-CNN with PaddleOCR, and (3) template-based rule
+extraction using Tesseract OCR; yielded a 91.4\% accuracy at the field
+level, which is higher than 87.9\% achieved by YOLOv11n alone, 84.3\% by
+Faster R-CNN alone, and 68.7\% by template-based extraction, thus
+reflecting the accuracy that has been lifted by 3.5\%, 7.1\%, and 22.7\%
+respectively.
+
+On comparing processing times, the trade-offs were quite intriguing: the
+ensemble system took an average of 17.3s per document, while YOLOv11n
+alone took 12.8s (25\% faster but less accurate), Faster R-CNN alone
+took 15.4s (11\% faster) and template-based method took only 8.2s (52\%
+faster but very inaccurate and completely failing on non-standard
+layouts). The F1-score study at IoU threshold 0.5 showed that WBF
+ensemble (90.80\%) was better than individual models in all the fields
+except in \textit{mobile\_no}, where the precision-focused approach of
+Faster R-CNN just showed marginal advantages.
+
+It is important to note that the dual-OCR method with
+PaddleOCR-Tesseract as a fallback drastically improved the
+character-level accuracy by 7.2\%, especially in the cases of the
+documents with low-contrast or degraded regions, where confidence-based
+arbitration selected the output of the engine that was
+superior.
+
+\section{Limitations and Future Work}
+
+\subsection{Current System Limitations}
+
+Even though the pipeline manages to deliver powerful results on the test
+dataset, several limitations affect the strength and the range of the
+system. The first limitation is that the dependency on bounding box
+annotations during the training phase means that the models will not be
+able to find fields that differ a lot from the eight classes that have
+been predefined; this means that the adaptability to bills containing
+additional information types such as tax breakdowns, discount codes, or
+patient details will be very limited. \cite{ref2}
+
+Secondly, the pipeline performance drops very significantly on documents
+that are heavily degraded - images with resolution less than 600×800
+pixels, blur more than motion kernel size 15 or skew angles beyond ±25°
+result in failure rates more than 40\% because the preprocessing module
+does not have advanced document rectification algorithms \cite{ref2},
+\cite{ref5}.
+
+Thirdly, the mobile number detection at 82.1\% reflects that the main
+OCR challenge is in differentiating between the very similar digit
+patterns; this problem gets worse when several phone numbers are written
+close to each other without any labels and characters. Moreover, object
+detection models like YOLO, on which this pipeline relies, have been
+known to struggle with predicting small objects that appear in groups
+\cite{ref5}, \cite{ref15}.
+
+Fourthly, the single-threaded processing architecture which is designed
+to process one document at a time only, is limiting the throughput to
+about 208 documents per hour, therefore, the GPU parallelization
+opportunities are not fully utilized \cite{ref3}, \cite{ref4}, \cite{ref17}.
+
+Fifthly, the system is currently supporting only English and numerical
+text, thus it is failing in cases of Hindi or any other regional
+language content which makes up for about 15-20\% of medical bills in
+rural areas of India, as the English model of PaddleOCR and the
+English-focused training of MedGemma restrict that the system is not
+able to handle multiple languages \cite{ref4}, \cite{ref5}, \cite{ref10}, \cite{ref19}.
+
+\subsection{Proposed Enhancements}
+
+Several upgrades across the board for preprocessing, modeling, data quality, and
+validation layers are planned to extend the capabilities of the proposed
+system. One of the ways the system could be enhanced is by using
+different methods for image preprocessing. For example, for document
+deskewing \cite{ref2}, text detection based on CRAFT \cite{ref7} could be used;
+for super-resolution, ESRGAN could be utilized; and for noise
+suppression, adaptive bilateral filtering could be applied-these are all
+techniques that are expected to lead to an OCR accuracy improvement of
+8-12\% on degraded scans. By gradually training the model with new data,
+the detection model can be extended to support 15-20 classes and thus it
+would be possible to get the values of auxiliary fields such as batch
+numbers and manufacturer details \cite{ref2}. Hindi, Tamil, and other
+scripts in India could be supported if the system were to be extended
+multilingual-wise using IndicOCR or Bhashini \cite{ref5}, thereby the system
+would be available for the whole country.
+
+Consideration of asynchronous task and containerized horizontal scaling
+by means of Docker and Kubernetes may result in the
+system's throughput to be elevated to the level of
+thousands of documents per hour. Improvement of data quality is still a
+challenging problem as the existing dataset consisting of 862 images of
+documents limits the generalizability of the model. 2,000-3,000
+annotated bills can be obtained through crowd-sourcing \cite{ref4}, \cite{ref5},
+synthetic augmentation, and semi-supervised learning to scale the
+dataset which will not only increase the robustness of the model but
+also the annotation quality via active learning, consensus labeling, and
+automated quality checks \cite{ref3}.
+
+Moreover, the solution to the problem of class imbalance, especially in
+the case of underrepresented entities such as \textit{mobile\_no} could be
+the use of class-weighted loss functions and targeted collection for
+performance improvement of minority classes by identifying the most
+suitable data sampling strategies. The error hunting process may be
+supported by machine learning-based anomaly detection as well as
+cross-field consistency checks (e.g., table total matching overall
+amount) while done from the side of validation. Machine learning
+techniques can be used for anomaly detection and cross-field consistency
+checks (e.g., table total matching overall amount) to identify error
+sources better and more quickly \cite{ref9}. Selective automations on the
+basis of confidence and active learning feedback loops are just two of
+the ways human-in-the-loop correction can be supported, thus allowing
+for continuous improvement facilitated by the balancing of accuracy and
+scalability for deployment in the real
+world.
+
+\subsection{Research Directions}
+
+Several promising research directions are identifiable from this work. One
+possibility is that attention-based ensemble methods that dynamically
+weight model predictions based on input characteristics (e.g., document
+quality metrics, field complexity scores) instead of static
+class-specific weights could lead to better adaptive performance.
+Another angle to consider is the effect of multimodal fusion
+architectures that jointly process the visual features (raw image
+patches) and the textual features (OCR outputs) through
+transformer-based encoders, which might surpass the sequential
+visual-then-textual processing in terms of semantic understanding
+\cite{ref5}, \cite{ref10}. A further idea is the creation of domain-specific
+vision-language models by continued pre-training of foundation models
+like Florence-2 or Qwen-VL on large-scale medical document corpora that
+would result in specialized extractors becoming far more efficient than
+general-purpose OCR + LLM pipelines \cite{ref3}, \cite{ref11}, \cite{ref19}. Apart
+from that, the study of zero-shot and few-shot learning methods that
+allow quick adaptation to new bill formats with a few labeled examples,
+thus, the annotation demand for healthcare providers diversification,
+would be considerably lowered, is also a viable direction. The last
+point is the usage of differential privacy and federated learning
+methods to facilitate collaborative model enhancement across healthcare
+institutions without the exchange of sensitive patient data, which is a
+significant step towards privacy-preserving system
+improvement.
+
+\section{Conclusion}
+
+This paper discusses the design, implementation, and evaluation of an
+end-to-end document parsing pipeline for automatically extracting and
+validating structured data from Indian medical bills. The pipeline
+integrates multiple cutting-edge techniques: a weighted box fusion
+ensemble combining YOLOv11n and Faster R-CNN for precise field
+detection, a dual-engine OCR approach with PaddleOCR and Tesseract for
+robust text extraction, Microsoft's Table Transformer
+for identifying complex tabular regions, and MedGemma 4B, a
+domain-specialized model, for intelligent semantic correction and
+validation. On a self-annotated test set of 60 varied medical bills, the
+pipeline achieved a 93.3\% document-level success rate and a 91.4\%
+field-level extraction accuracy, with an average processing time of 17.3
+seconds per document on consumer-grade GPU hardware.
+
+The ensemble detection method was very efficient and managed to achieve
+a macro F1-score of 90.66\% at IoU 0.5 by utilizing class-specific
+fusion weights, which allowed the optimization of the complementary
+strengths of real-time YOLO and precision-focused Faster R-CNN
+architectures. The dual-OCR strategy with confidence-based arbitration
+result character-level accuracy improvements by 7.2\% over single-engine
+baselines, thus proving the necessity of redundancy in dealing with
+variable document quality. The LLM-based post-processing pipeline
+managed to fix 83.6\% of the initial errors substantially lowering the
+requirement for manual review, at the same time, it preserved the
+semantic correctness due to the domain-aware reasoning. The hybrid table
+extraction technique: employing detection, spatial OCR clustering and
+LLM-driven semantic parsing reached 91.2\% accuracy in structured
+product rows even though grid structures were missing in 68\% of the
+cases thus it was 27\% better than the traditional grid-detection
+method.
+
+The modular design, which clearly separates detection, extraction,
+validation, and correction stages, makes it possible to gradually bring
+in improvements and allows the system to be put in place on affordable
+local hardware via 4-bit model quantization and eager loading
+strategies. The pipeline is capable of processing roughly 208 documents
+per hour with a single RTX 3050 GPU and can be easily scaled
+horizontally for institutional-scale workloads. Although the existing
+limitations, such as the system's sensitivity to heavily
+degraded images, the absence of multilingual support, and restrictions
+on the extensibility of field types, are still challenges to be
+addressed later on, the pipeline is proof that carefully coordinated
+combinations of specialized models can produce strong document
+comprehension without the need for large-scale end-to-end training on
+domain-specific data.
+
+This research is a step forward in the AI industry-specific deployment
+literature for healthcare automation. It proves that hybrid methods that
+fuse classical computer vision, state-of-the-art deep learning, and
+large language models can bring about production-ready systems that
+substantially enhance the throughput of manual work yet still maintain
+high accuracy standards that are compatible with real-world medical
+billing workflows. The solutions and architectural strategies put
+forward here have a wider application than medical bills alone,
+extending to any structured document extraction tasks and thus offering
+a framework for the construction of dependable, serviceable, and
+high-performing document intelligence systems. Planned future research
+will concentrate on widening the range of languages supported, enhancing
+the degraded document performance through better preprocessing, and
+investigating the possibility of using end-to-end vision-language models
+that not only simplify the pipeline but also keep or exceed the current accuracy levels.
+
+\section*{Acknowledgment}
+
+  I would like to express my sincere gratitude to my professor Dr. Kanika
+Garg, for mentoring me throughout the duration of this research. I also
+thank the SRMIST Delhi-NCR Campus for providing resources and
+institutional support that made this research possible. Special thanks
+to the open-source community for developing and maintaining the
+foundational libraries and models utilized in this work. I am grateful
+to the Roboflow Universe platform for hosting the initial dataset and to
+all contributors who make their work publicly available, advancing
+research and development in document understanding and medical AI.
+
+\balance
+\begin{thebibliography}{20}
+
+\bibitem{ref1}
+R. L. Chaudhary, A. R. Peddireddy, and U. Mathur, ``Robotic Process Automation in Billing Management: Enhancing Healthcare Efficiency,'' 2023, \textit{Unpublished}. doi: 10.13140/RG.2.2.27402.68809.
+
+\bibitem{ref2}
+Š. Šimsa \textit{et al.}, ``DocILE Benchmark for Document Information Localization and Extraction,'' May 2023, \textit{arXiv}: arXiv:2302.05658. doi: 10.48550/arXiv.2302.05658.
+
+\bibitem{ref3}
+M. Dhouib, G. Bettaieb, and A. Shabou, ``DocParser: End-to-end OCR-free Information Extraction from Visually Rich Documents,'' May 2023, \textit{arXiv}: arXiv:2304.12484. doi: 10.48550/arXiv.2304.12484.
+
+\bibitem{ref4}
+G. Kim \textit{et al.}, ``OCR-Free Document Understanding Transformer,'' in \textit{Computer Vision -- ECCV 2022}, vol. 13688, Cham: Springer Nature Switzerland, 2022, pp. 498--517. doi: 10.1007/978-3-031-19815-1\_29.
+
+\bibitem{ref5}
+S. Bhattacharyya, P. Deb, and C. V. Jawahar, ``Adapting Vision-Language Models for Hindi OCR''.
+
+\bibitem{ref6}
+A. Datta \textit{et al.}, ``Preserving medical information from doctor's prescription ensuring relation among the terminology,'' \textit{Comput. Biol. Med.}, vol. 188, p. 109812, Apr. 2025. doi: 10.1016/j.compbiomed.2025.109812.
+
+\bibitem{ref7}
+Y. Baek, B. Lee, D. Han, S. Yun, and H. Lee, ``Character Region Awareness for Text Detection,'' in \textit{2019 IEEE/CVF CVPR}, Long Beach, CA, USA, June 2019, pp. 9357--9366. doi: 10.1109/CVPR.2019.00959.
+
+\bibitem{ref8}
+D. Deng, H. Liu, X. Li, and D. Cai, ``PixelLink: Detecting Scene Text via Instance Segmentation,'' Jan. 2018, \textit{arXiv}: arXiv:1801.01315. doi: 10.48550/arXiv.1801.01315.
+
+\bibitem{ref9}
+Z. Shen, R. Zhang, M. Dell, B. C. G. Lee, J. Carlson, and W. Li, ``LayoutParser: A Unified Toolkit for Deep Learning Based Document Image Analysis,'' June 2021, \textit{arXiv}: arXiv:2103.15348. doi: 10.48550/arXiv.2103.15348.
+
+\bibitem{ref10}
+Y. Huang, T. Lv, L. Cui, Y. Lu, and F. Wei, ``LayoutLMv3: Pre-training for Document AI with Unified Text and Image Masking,'' July 2022, \textit{arXiv}: arXiv:2204.08387. doi: 10.48550/arXiv.2204.08387.
+
+\bibitem{ref11}
+B. Davis, B. Morse, B. Price, C. Tensmeyer, C. Wigington, and V. Morariu, ``End-to-end Document Recognition and Understanding with Dessurt,'' June 2022, \textit{arXiv}: arXiv:2203.16618. doi: 10.48550/arXiv.2203.16618.
+
+\bibitem{ref12}
+X.-H. Li, F. Yin, and C.-L. Liu, ``DocSAM: Unified Document Image Segmentation via Query Decomposition and Heterogeneous Mixed Learning''.
+
+\bibitem{ref13}
+S. Ren, K. He, R. Girshick, and J. Sun, ``Faster R-CNN: Towards Real-Time Object Detection with Region Proposal Networks,'' Jan. 2016, \textit{arXiv}: arXiv:1506.01497. doi: 10.48550/arXiv.1506.01497.
+
+\bibitem{ref14}
+K. He, G. Gkioxari, P. Dollár, and R. Girshick, ``Mask R-CNN,'' Jan. 2018, \textit{arXiv}: arXiv:1703.06870. doi: 10.48550/arXiv.1703.06870.
+
+\bibitem{ref15}
+J. Redmon, S. Divvala, R. Girshick, and A. Farhadi, ``You Only Look Once: Unified, Real-Time Object Detection,'' in \textit{2016 IEEE CVPR}, Las Vegas, NV, USA, June 2016, pp. 779--788. doi: 10.1109/CVPR.2016.91.
+
+\bibitem{ref16}
+N. Livathinos \textit{et al.}, ``Docling: An Efficient Open-Source Toolkit for AI-driven Document Conversion,'' Jan. 2025, \textit{arXiv}: arXiv:2501.17887. doi: 10.48550/arXiv.2501.17887.
+
+\bibitem{ref17}
+K. Lee \textit{et al.}, ``Pix2Struct: Screenshot Parsing as Pretraining for Visual Language Understanding,'' June 2023, \textit{arXiv}: arXiv:2210.03347. doi: 10.48550/arXiv.2210.03347.
+
+\bibitem{ref18}
+D. Lewis, G. Agam, S. Argamon, O. Frieder, D. Grossman, and J. Heard, ``Building a test collection for complex document information processing,'' in \textit{Proc. 29th ACM SIGIR}, Seattle, WA, Aug. 2006, pp. 665--666. doi: 10.1145/1148170.1148307.
+
+\bibitem{ref19}
+A. Sellergren \textit{et al.}, ``MedGemma Technical Report,'' July 2025, \textit{arXiv}: arXiv:2507.05201. doi: 10.48550/arXiv.2507.05201.
+
+\bibitem{ref20}
+W. Kwon \textit{et al.}, ``Efficient Memory Management for Large Language Model Serving with PagedAttention,'' Sept. 2023, \textit{arXiv}: arXiv:2309.06180. doi: 10.48550/arXiv.2309.06180.
+
+\end{thebibliography}
+
+\end{document}
+
+
+
