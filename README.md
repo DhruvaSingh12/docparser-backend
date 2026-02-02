@@ -39,7 +39,7 @@ echo DATABASE_URL=postgresql://user:pass@host:port/db > .env
 
 ```bash
 # Start server
-python -m uvicorn app.main:app --port 8000 --host 127.0.0.1
+F:/Projects/docparse/backend/.venv/Scripts/python.exe -m uvicorn app.main:app --port 8000 --host 127.0.0.1
 ```
 Access at: http://localhost:8000/docs
 

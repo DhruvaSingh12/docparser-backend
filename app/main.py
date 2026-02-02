@@ -5,6 +5,9 @@ import os
 import warnings
 import logging
 from dotenv import load_dotenv
+
+load_dotenv()
+
 from app.api.medical_bills import router as medical_bills_router
 from app.db import init_db
 from datetime import datetime, timezone
@@ -18,19 +21,12 @@ logging.getLogger("ultralytics").setLevel(logging.WARNING)
 logging.getLogger("torch").setLevel(logging.WARNING)
 logging.getLogger("torchvision").setLevel(logging.WARNING)
 
-load_dotenv()
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     print("Starting DocParse API...")
     init_db()
     print("Database initialized.")
-    
-    # Eager load all models at startup
-    print("\n" + "="*60)
-    print("LOADING ALL MODELS AT STARTUP...")
-    print("="*60)
     
     try:
         # 1. Load OCR engines
